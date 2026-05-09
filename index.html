@@ -308,9 +308,10 @@
 
         showNotification("🎉 Success! TLX tokens sent to your wallet!", "success");
         console.log("Transaction Hash:", txId);
-      } catch (err) {
-        console.error(err);
-        showNotification("Transaction failed. Check console.", "error");
+      } catch (e) { 
+  console.error("Pontos hiba oka:", e);
+  showNotification('Connection failed', 'error'); 
+}
       } finally {
         buyBtn.innerText = originalText;
         buyBtn.disabled = false;
