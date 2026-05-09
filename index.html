@@ -157,22 +157,17 @@
 
   <script>
     // =========================================================
-    // 1. BEÁLLÍTÁSOK A TE ADATAIDDAL
+    // 1. BEÁLLÍTÁSOK (Automatikus ATA generálással támogatva)
     // =========================================================
     const CONFIG = {
-      NETWORK: "devnet",
       RPC_URL: "https://api.devnet.solana.com",
-      
-      PROGRAM_ID: "3Ca5kGW5Gcvxq8pRVqcknpTwKiXVzemALn4Sg7gMCddB", 
-      TOKEN_MINT: "4xeF7uQgMUcmy6LhCukmPqm4uPu1C16kM42y1biu3YAt", 
-      ADMIN_WALLET: "FyRaCwz4szJTP7kD5bjW4hnN8YqZvbG1zSj7G58PJRgb",
-      
-      // Az új generált CÍM a client.ts lefutásából
-      PRESALE_STATE: "3JxmmnRRPw7SidAbQpBE5Ea2n7hEAyvuzzAzQMbPPJco",
-      
+      PROGRAM_ID: "Ch7TkVphDyToJtvAGXDvgt1zsiQg5zhhNNRm8PJdkiD4",
+      TOKEN_MINT: "4xeF7uQgMUcmy6LhCukmPqm4uPu1C16kM42y1biu3YAt",
+      ADMIN_WALLET: "4iubzdpP14Mo32iRseD7nZEhP1RVLWjjwbsh228uBk3z", // Ide jönnek a SOL-ok
+      PRESALE_STATE: "BhfjyG1bRUEeEBaVezWKgff7WLvmjG47QPAsZUT8okho",
+      VAULT_PDA: "DgTtC8nFP4v8ngHnwzpDTWaNAETLpaLZsh5nFo5HENKm",
       EXCHANGE_RATE: 1000000,
-      MIN_SOL: 0.01,
-      PRESALE_CAP: 40000000 
+      MIN_SOL: 0.01
     };
 
     // =========================================================
@@ -198,8 +193,8 @@
     // =========================================================
     // 3. ALAPVETŐ LOGIKA ÉS UI KEZELÉS
     // =========================================================
+    let provider = null;
     let walletConnected = false;
-    let userPublicKey = null;
     const connection = new solanaWeb3.Connection(CONFIG.RPC_URL, "confirmed");
 
     function showNotification(msg, type = 'info') {
@@ -210,13 +205,16 @@
     }
 
     async function handleConnect() {
-      if ('solana' in window && window.solana?.isPhantom) {
+      if (window.solana?.isPhantom) {
         try {
           const resp = await window.solana.connect();
-          userPublicKey = resp.publicKey.toString();
+          
+          // Globális provider beállítása a vásárláshoz
+          provider = new anchor.AnchorProvider(connection, window.solana, { preflightCommitment: "confirmed" });
+          anchor.setProvider(provider);
           walletConnected = true;
           
-          document.getElementById('connect-wallet-btn').innerHTML = `<i class="fa-solid fa-check mr-2"></i> ${userPublicKey.slice(0,4)}...${userPublicKey.slice(-4)}`;
+          document.getElementById('connect-wallet-btn').innerHTML = `<i class="fa-solid fa-check mr-2"></i> ${resp.publicKey.toString().slice(0,4)}...${resp.publicKey.toString().slice(-4)}`;
           document.getElementById('buy-btn').innerText = 'Buy TLX';
           
           const bal = await connection.getBalance(resp.publicKey) / solanaWeb3.LAMPORTS_PER_SOL;
@@ -228,7 +226,7 @@
       }
     }
 
-    // Input kalkulátor
+    // Input kalkulátor és UI gomb frissítése
     document.getElementById('sol-input').addEventListener('input', (e) => {
       const val = parseFloat(e.target.value);
       const buyBtn = document.getElementById('buy-btn');
@@ -250,87 +248,72 @@
     // =========================================================
     document.getElementById('buy-btn').onclick = async () => {
       if (!walletConnected) return;
-      const solAmount = parseFloat(document.getElementById('sol-input').value);
-      if (!solAmount || solAmount < CONFIG.MIN_SOL) return;
-
-      showNotification('Jóváhagyás a tárcádban...', 'info');
+      const buyBtn = document.getElementById('buy-btn');
+      const originalText = buyBtn.innerText;
+      buyBtn.innerText = "Processing...";
+      buyBtn.disabled = true;
 
       try {
-        const { PublicKey, SystemProgram, Transaction } = solanaWeb3;
-        const { Program, AnchorProvider, BN } = anchor;
-        
-        const provider = new AnchorProvider(connection, window.solana, { preflightCommitment: "confirmed" });
-        anchor.setProvider(provider);
-        const program = new Program(IDL, new PublicKey(CONFIG.PROGRAM_ID), provider);
-        
-        // Címek beállítása
+        const solAmount = parseFloat(document.getElementById('sol-input').value);
+        const solAmountLamports = new anchor.BN(solAmount * solanaWeb3.LAMPORTS_PER_SOL);
         const buyerPubkey = provider.wallet.publicKey;
-        const adminPubkey = new PublicKey(CONFIG.ADMIN_WALLET);
-        const presaleStatePubkey = new PublicKey(CONFIG.PRESALE_STATE);
-        const tokenMintPubkey = new PublicKey(CONFIG.TOKEN_MINT);
+        const mintPubkey = new solanaWeb3.PublicKey(CONFIG.TOKEN_MINT);
 
-        // Vault PDA kiszámítása
-        const [vaultPDA] = PublicKey.findProgramAddressSync(
-          [anchor.utils.bytes.utf8.encode("vault")],
-          program.programId
-        );
+        // 1. ATA (Token Tárca) címének kiszámítása a vásárlónak
+        const buyerAta = await splToken.getAssociatedTokenAddress(mintPubkey, buyerPubkey);
 
-        // A vásárló token fiókja (ATA - Associated Token Account)
-        const buyerTokenAccount = await splToken.getAssociatedTokenAddress(
-          tokenMintPubkey,
-          buyerPubkey
-        );
+        // 2. Tranzakció építése
+        const tx = new solanaWeb3.Transaction();
 
-        const tx = new Transaction();
-
-        // Ellenőrizzük, hogy van-e már a vásárlónak token fiókja. Ha nincs, létrehozzuk neki.
-        const buyerTokenAccountInfo = await connection.getAccountInfo(buyerTokenAccount);
-        if (!buyerTokenAccountInfo) {
+        // 3. Ellenőrizzük, létezik-e a token tárca. Ha nem, hozzáadjuk a létrehozó utasítást!
+        const ataInfo = await connection.getAccountInfo(buyerAta);
+        if (!ataInfo) {
+          console.log("Nem létezik ATA, létrehozás hozzáfűzése a tranzakcióhoz...");
           tx.add(
             splToken.createAssociatedTokenAccountInstruction(
-              buyerPubkey, // ki fizeti a létrehozást
-              buyerTokenAccount, // az új token cím
-              buyerPubkey, // a token cím tulajdonosa
-              tokenMintPubkey // a token típusa (TLX)
+              buyerPubkey, // Fizető
+              buyerAta,    // Létrehozandó cím
+              buyerPubkey, // Tulajdonos
+              mintPubkey   // Token Mint
             )
           );
         }
 
-        // Lamport-ra alakítjuk az SOL összeget (1 SOL = 1,000,000,000 lamports)
-        const lamports = new BN(solAmount * solanaWeb3.LAMPORTS_PER_SOL);
-
-        // A Rust okosszerződés BuyTokens metódusának felépítése
-        const buyInstruction = await program.methods.buyTokens(lamports)
+        // 4. Vásárlási (Buy) utasítás hozzáadása
+        const program = new anchor.Program(IDL, new solanaWeb3.PublicKey(CONFIG.PROGRAM_ID), provider);
+        const buyIx = await program.methods.buyTokens(solAmountLamports)
           .accounts({
             buyer: buyerPubkey,
-            admin: adminPubkey,
-            presaleState: presaleStatePubkey,
-            vault: vaultPDA,
-            buyerTokenAccount: buyerTokenAccount,
+            admin: new solanaWeb3.PublicKey(CONFIG.ADMIN_WALLET),
+            presaleState: new solanaWeb3.PublicKey(CONFIG.PRESALE_STATE),
+            vault: new solanaWeb3.PublicKey(CONFIG.VAULT_PDA),
+            buyerTokenAccount: buyerAta,
             tokenProgram: splToken.TOKEN_PROGRAM_ID,
-            systemProgram: SystemProgram.programId,
+            systemProgram: solanaWeb3.SystemProgram.programId,
           })
           .instruction();
 
-        tx.add(buyInstruction);
+        tx.add(buyIx);
 
-        // Tranzakció blokkhash beállítása és beküldése a hálózatra
-        const { blockhash } = await connection.getLatestBlockhash();
-        tx.recentBlockhash = blockhash;
+        // 5. Küldés a hálózatra
         tx.feePayer = buyerPubkey;
-
-        // Tranzakció aláírása a Phantom tárcával
+        tx.recentBlockhash = (await connection.getLatestBlockhash()).blockhash;
+        
+        showNotification("Approve transaction in Phantom...", "info");
         const signedTx = await provider.wallet.signTransaction(tx);
-        
-        showNotification('Tranzakció küldése a hálózatra...', 'info');
         const txId = await connection.sendRawTransaction(signedTx.serialize());
-        await connection.confirmTransaction(txId);
-
-        showNotification('Sikeres vásárlás! Tokenek a tárcádban.', 'success');
         
+        showNotification("Verifying transaction on blockchain...", "info");
+        await connection.confirmTransaction(txId, "confirmed");
+
+        showNotification("🎉 Success! TLX tokens sent to your wallet!", "success");
+        console.log("Transaction Hash:", txId);
       } catch (err) {
-        console.error("Vásárlási hiba:", err);
-        showNotification("Tranzakció sikertelen. Ellenőrizd a konzolt!", "error");
+        console.error(err);
+        showNotification("Transaction failed. Check console.", "error");
+      } finally {
+        buyBtn.innerText = originalText;
+        buyBtn.disabled = false;
       }
     };
 
