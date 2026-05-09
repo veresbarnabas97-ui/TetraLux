@@ -157,13 +157,13 @@
 
   <script>
     // =========================================================
-    // 1. BEÁLLÍTÁSOK (Automatikus ATA generálással támogatva)
+    // 1. BEÁLLÍTÁSOK (Véglegesített Címekkel)
     // =========================================================
     const CONFIG = {
       RPC_URL: "https://api.devnet.solana.com",
       PROGRAM_ID: "Ch7TkVphDyToJtvAGXDvgt1zsiQg5zhhNNRm8PJdkiD4",
       TOKEN_MINT: "4xeF7uQgMUcmy6LhCukmPqm4uPu1C16kM42y1biu3YAt",
-      ADMIN_WALLET: "4iubzdpP14Mo32iRseD7nZEhP1RVLWjjwbsh228uBk3z", // Ide jönnek a SOL-ok
+      ADMIN_WALLET: "4iubzdpP14Mo32iRseD7nZEhP1RVLWjjwbsh228uBk3z",
       PRESALE_STATE: "BhfjyG1bRUEeEBaVezWKgff7WLvmjG47QPAsZUT8okho",
       VAULT_PDA: "DgTtC8nFP4v8ngHnwzpDTWaNAETLpaLZsh5nFo5HENKm",
       EXCHANGE_RATE: 1000000,
@@ -209,7 +209,6 @@
         try {
           const resp = await window.solana.connect();
           
-          // Globális provider beállítása a vásárláshoz
           provider = new anchor.AnchorProvider(connection, window.solana, { preflightCommitment: "confirmed" });
           anchor.setProvider(provider);
           walletConnected = true;
@@ -244,7 +243,7 @@
     });
 
     // =========================================================
-    // 4. VÁSÁRLÁSI LOGIKA (WEB3 / ANCHOR BEKÖTÉS)
+    // 4. VÁSÁRLÁSI LOGIKA (JAVÍTOTT LAMPORT & SZINTAKTIKA)
     // =========================================================
     document.getElementById('buy-btn').onclick = async () => {
       if (!walletConnected) return;
@@ -255,7 +254,10 @@
 
       try {
         const solAmount = parseFloat(document.getElementById('sol-input').value);
-        const solAmountLamports = new anchor.BN(solAmount * solanaWeb3.LAMPORTS_PER_SOL);
+        
+        // JAVÍTÁS: Math.floor a lebegőpontos hibák elkerülésére lamport számításnál
+        const solAmountLamports = new anchor.BN(Math.floor(solAmount * solanaWeb3.LAMPORTS_PER_SOL));
+        
         const buyerPubkey = provider.wallet.publicKey;
         const mintPubkey = new solanaWeb3.PublicKey(CONFIG.TOKEN_MINT);
 
@@ -308,11 +310,12 @@
 
         showNotification("🎉 Success! TLX tokens sent to your wallet!", "success");
         console.log("Transaction Hash:", txId);
+        
       } catch (e) { 
-  console.error("Pontos hiba oka:", e);
-  showNotification('Connection failed', 'error'); 
-}
+        console.error("Pontos hiba oka:", e);
+        showNotification('Transaction failed. Check console.', 'error'); 
       } finally {
+        // JAVÍTÁS: Eltávolítva a felesleges "}" ami miatt összeomlott a böngésző
         buyBtn.innerText = originalText;
         buyBtn.disabled = false;
       }
