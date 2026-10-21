@@ -129,7 +129,7 @@
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
       <div class="text-center mb-16">
         <h2 class="text-4xl font-display font-bold text-white">Tokenomics & Distribution</h2>
-        <p class="mt-2 text-gray-400">Transparent allocation for sustainable growth</p>
+        <p class="mt-2 text-gray-400">Transparent allocation for sustainable growth (Total Supply: 99,999,999 TLX)</p>
       </div>
       <div class="grid grid-cols-1 lg:grid-cols-2 gap-12 items-center">
         <div class="relative w-full h-80 flex items-center justify-center">
@@ -144,7 +144,7 @@
         <div class="space-y-6">
           <div class="flex items-center justify-between p-4 glass-panel rounded-lg border-l-4 border-emerald-500">
             <span class="text-lg font-semibold">Presale</span>
-            <span class="text-2xl font-bold text-emerald-400">40%</span>
+            <span class="text-2xl font-bold text-emerald-400">40% (39,999,999.6 TLX)</span>
           </div>
           <div class="flex items-center justify-between p-4 glass-panel rounded-lg border-l-4 border-blue-500">
             <span class="text-lg font-semibold">Liquidity Pool</span>
@@ -260,12 +260,12 @@
       <div class="text-center mb-8">
         <h2 class="text-3xl font-display font-bold text-white mb-2">Presale is Live</h2>
         <p class="text-sm text-gray-400">Exchange SOL for TLX directly via Smart Contract.</p>
-        <p class="text-xs mt-2">Network: <span id="network-label" class="text-emerald-400 font-bold">Solana Devnet</span></p>
+        <p class="text-xs mt-2">Network: <span id="network-label" class="text-emerald-400 font-bold">Solana Mainnet</span></p>
       </div>
       <div class="mb-6">
         <div class="flex justify-between text-xs mb-2">
           <span class="text-gray-400">Tokens Sold</span>
-          <span class="text-white font-bold"><span id="sold-amount">0</span> / 40,000,000 TLX</span>
+          <span class="text-white font-bold"><span id="sold-amount">0</span> / 39,999,999.6 TLX</span>
         </div>
         <div class="w-full bg-gray-800 h-3 rounded-full overflow-hidden border border-gray-700">
           <div id="progress-bar" class="bg-gradient-to-r from-emerald-500 to-emerald-300 h-full w-[0%] transition-all duration-1000"></div>
@@ -309,23 +309,25 @@
   </footer>
 
   <script>
-    // ===================== CONFIG =====================
-    // Frissítve a lib.rs és client.ts alapján (Devnet)
+    // ===================== CONFIGURATION =====================
     const CONFIG = {
-      NETWORK: "devnet",
-      RPC_URL: "https://api.devnet.solana.com",
+      NETWORK: "mainnet-beta",
+      // Illeszd be ide a Helius API kulcsodat:
+      RPC_URL: "https://mainnet.helius-rpc.com/?api-key=YOUR_HELIUS_API_KEY", 
       
-      PROGRAM_ID: "Ch7TkVphDyToJtvAGXDvgt1zsiQg5zhhNNRm8PJdkiD4", // A lib.rs declare_id! értéke
-      
-      // FIGYELEM: A client.ts futtatásakor kapott "ÚJ PRESALE STATE CÍM"-et ide másold be!
+      TOKEN_MINT: "4iubzdpP14Mo32iRseD7nZEhP1RVLWjjwbsh228uBk3z",
+      ADMIN_SAFEPAL: "AgwAVqtaxGy2B2PbGnPSKtjLYQecV5hEfMMcC4ditv77",
+      VAULT_WALLET: "6HXGpuDNhHmhu4Y26XLysL52pcPBZtuwYzpU91eC4jZJ",
+
+      // Anchor Deploy utáni címsorok:
+      PROGRAM_ID: "Ch7TkVphDyToJtvAGXDvgt1zsiQg5zhhNNRm8PJdkiD4", 
       PRESALE_STATE: "BhfjyG1bRUEeEBaVezWKgff7WLvmjG47QPAsZUT8okho", 
-      
+
       EXCHANGE_RATE: 1000000,
       MIN_SOL: 0.01,
-      PRESALE_CAP: 40000000
+      PRESALE_CAP: 39999999.6
     };
 
-    // IDL - Pontosan a lib.rs struktúrájához igazítva
     const IDL = {
       "version": "0.1.0", 
       "name": "tetralux_presale",
@@ -359,13 +361,11 @@
       ]
     };
 
-    // ============ Állapot (State) =============
     let walletConnected = false;
     let userPublicKey = null;
     let userBalance = 0;
     const connection = new solanaWeb3.Connection(CONFIG.RPC_URL, "confirmed");
 
-    // ========== Utility & Értesítések =============
     function showNotification(message, type = 'info') {
       const notification = document.createElement('div');
       notification.className = `notification ${type}`;
@@ -387,7 +387,28 @@
       document.getElementById('sold-amount').textContent = formatNumber(sold);
     }
 
-    // ========== Web3 Csatlakozás ===========
+    async function fetchOnChainPresaleState() {
+      try {
+        const presaleStatePubkey = new solanaWeb3.PublicKey(CONFIG.PRESALE_STATE);
+        const programId = new solanaWeb3.PublicKey(CONFIG.PROGRAM_ID);
+        const provider = new anchor.AnchorProvider(connection, {
+          publicKey: solanaWeb3.Keypair.generate().publicKey,
+          signTransaction: () => {},
+          signAllTransactions: () => {}
+        }, { preflightCommitment: "confirmed" });
+
+        const program = new anchor.Program(IDL, programId, provider);
+        const state = await program.account.presaleState.fetch(presaleStatePubkey);
+        
+        if(state && state.tokensSold) {
+          const soldTokens = state.tokensSold.toNumber() / 1_000_000;
+          updateProgressBar(soldTokens, CONFIG.PRESALE_CAP);
+        }
+      } catch (error) {
+        console.warn("Could not fetch on-chain state, using default:", error);
+      }
+    }
+
     async function getUserBalance(publicKey) {
       try {
         const balance = await connection.getBalance(new solanaWeb3.PublicKey(publicKey));
@@ -429,8 +450,9 @@
 
     async function handleConnect() {
       try {
-        if ('solana' in window && window.solana?.isPhantom) {
-          const resp = await window.solana.connect();
+        if ('solana' in window) {
+          const provider = window.solana;
+          const resp = await provider.connect();
           userPublicKey = resp.publicKey.toString();
           userBalance = await getUserBalance(userPublicKey);
           updateWalletUI(true, userPublicKey);
@@ -440,11 +462,10 @@
           window.open('https://phantom.app/', '_blank');
         }
       } catch (error) {
-        showNotification('Connection failed. Try again.', 'error');
+        showNotification('Connection cancelled or failed.', 'error');
       }
     }
 
-    // ============= OKOSSZERZŐDÉS VÁSÁRLÁSI LOGIKA (lib.rs alapján) ===============
     async function presaleBuy() {
       const solAmount = parseFloat(document.getElementById('sol-input').value);
       if (!solAmount || solAmount < CONFIG.MIN_SOL) {
@@ -457,9 +478,9 @@
       buyBtn.classList.add('animate-pulse');
 
       try {
-        if (!window.solana || !window.solana.isPhantom) throw new Error("Phantom wallet not found!");
+        if (!window.solana) throw new Error("Wallet provider not found!");
 
-        showNotification('Waiting for approval in Phantom...', 'info');
+        showNotification('Waiting for approval in Wallet...', 'info');
 
         const provider = new anchor.AnchorProvider(connection, window.solana, { preflightCommitment: "confirmed" });
         anchor.setProvider(provider);
@@ -469,51 +490,37 @@
 
         const buyerPubkey = provider.wallet.publicKey;
         const presaleStatePubkey = new solanaWeb3.PublicKey(CONFIG.PRESALE_STATE);
+        const tokenMintPubkey = new solanaWeb3.PublicKey(CONFIG.TOKEN_MINT);
 
-        // 1. Állapot lekérése (Admin, Vault és tokenMint címekhez)
-        const state = await program.account.presaleState.fetch(presaleStatePubkey);
-
-        // 2. Vault PDA meghatározása (ugyanúgy, ahogy a client.ts csinálja)
-        const [vaultPDA] = solanaWeb3.PublicKey.findProgramAddressSync(
-          [Buffer.from("vault")],
-          programId
-        );
-
-        // 3. Buyer token account (ATA) meghatározása
         const buyerATA = await splToken.getAssociatedTokenAddress(
-          state.tokenMint,
+          tokenMintPubkey,
           buyerPubkey
         );
 
-        // 4. Tranzakció építése
         let tx = new solanaWeb3.Transaction();
 
-        // Ellenőrizzük, hogy van-e már TLX számlája a vásárlónak
         try {
           await splToken.getAccount(connection, buyerATA);
         } catch (e) {
-          // Ha nincs, hozzáadjuk a létrehozó utasítást a tranzakció elejére!
           tx.add(
             splToken.createAssociatedTokenAccountInstruction(
               buyerPubkey,
               buyerATA,
               buyerPubkey,
-              state.tokenMint
+              tokenMintPubkey
             )
           );
         }
 
-        // 5. Mennyiség konvertálása Lamports-ba (10^9) BN segítségével
-        const lamports = new anchor.BN(solAmount * solanaWeb3.LAMPORTS_PER_SOL);
+        const lamports = new anchor.BN(Math.round(solAmount * solanaWeb3.LAMPORTS_PER_SOL));
 
-        // 6. Vásárlási utasítás (Instruction) generálása
         const buyIx = await program.methods
           .buyTokens(lamports)
           .accounts({
             buyer: buyerPubkey,
-            admin: state.admin,
+            admin: new solanaWeb3.PublicKey(CONFIG.ADMIN_SAFEPAL),
             presaleState: presaleStatePubkey,
-            vault: vaultPDA,
+            vault: new solanaWeb3.PublicKey(CONFIG.VAULT_WALLET),
             buyerTokenAccount: buyerATA,
             tokenProgram: splToken.TOKEN_PROGRAM_ID,
             systemProgram: solanaWeb3.SystemProgram.programId,
@@ -522,21 +529,22 @@
           
         tx.add(buyIx);
 
-        // 7. Tranzakció aláírása és elküldése
         const signature = await provider.sendAndConfirm(tx);
         
-        showNotification(`✓ Transaction successful! ID: ${signature.slice(0,8)}...`, 'success');
+        showNotification(`✓ Transaction successful! Tx ID: ${signature.slice(0,8)}...`, 'success');
         
-        // Egyenlegek frissítése a felületen
         userBalance = await getUserBalance(buyerPubkey);
         document.getElementById('sol-balance').textContent = userBalance.toFixed(2);
         
-        const currentSold = parseInt(document.getElementById('sold-amount').innerText.replace(/,/g, '')) || 0;
-        updateProgressBar(currentSold + Math.floor(solAmount * CONFIG.EXCHANGE_RATE), CONFIG.PRESALE_CAP);
+        fetchOnChainPresaleState();
 
       } catch (error) {
         console.error("Transaction Error:", error);
-        showNotification(`Transaction failed. Ensure you have enough SOL or check console.`, 'error');
+        if (error.message && (error.message.includes("User rejected") || error.code === 4001)) {
+          showNotification('Transaction cancelled by user.', 'info');
+        } else {
+          showNotification(`Transaction failed. Ensure you have enough SOL.`, 'error');
+        }
       } finally {
         buyBtn.innerText = 'Buy TLX';
         buyBtn.disabled = false;
@@ -544,10 +552,12 @@
       }
     }
 
-    // ================= ESEMÉNYKEZELŐK =================
     document.addEventListener('DOMContentLoaded', () => {
       const modal = document.getElementById('presale-modal');
-      document.getElementById('open-presale-btn').onclick = () => modal.classList.remove('hidden');
+      document.getElementById('open-presale-btn').onclick = () => {
+        modal.classList.remove('hidden');
+        fetchOnChainPresaleState();
+      };
       document.getElementById('close-presale').onclick = () => modal.classList.add('hidden');
       modal.addEventListener('click', (e) => { if (e.target === modal) modal.classList.add('hidden'); });
 
@@ -555,7 +565,7 @@
       document.getElementById('connect-wallet-mobile').onclick = handleConnect;
 
       const solInput = document.getElementById('sol-input');
-      solInput.oninput = (e) => {
+      solInput.oninput = () => {
         const val = parseFloat(solInput.value);
         if (!isNaN(val) && val >= CONFIG.MIN_SOL) {
           document.getElementById('tlx-output').value = formatNumber(val * CONFIG.EXCHANGE_RATE);
@@ -600,7 +610,7 @@
 
       updateProgressBar(0, CONFIG.PRESALE_CAP);
 
-      if ('solana' in window && window.solana?.isPhantom) {
+      if ('solana' in window) {
         window.solana.connect({ onlyIfTrusted: true })
           .then(r => {
             userPublicKey = r.publicKey.toString();
